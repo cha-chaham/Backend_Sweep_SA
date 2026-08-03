@@ -170,14 +170,35 @@ class VRPEngine:
         waktu_komputasi = time.time() - start_time
         hasil_akhir = []
 
+        depot_lat = self.depot['lat']
+        depot_lon = self.depot['lon']
+
         for i in range(len(rute_optimal_sa)):
-            rute_sa = rute_optimal_sa[i]
+            rute_sa = rute_optimal_sa[i] # Contoh: ['N0', 'N3', 'N1', 'N0']
             jarak_sa = self._hitung_jarak_rute(rute_sa)
             waktu_sa = self._hitung_estimasi_waktu(jarak_sa, rute_sa)
             muatan_sa = sum(self.raw_data[n]['demand'] for n in rute_sa if n != 'N0')
             is_feasible = waktu_sa <= self.max_time_minutes
 
-            # Ubah kode node (N0, N1, dst) menjadi nama toko asli
+            # Ambil node di antara depot (toko-toko pelanggan saja)
+            intermediate_nodes = [node for node in rute_sa if node != 'N0']
+
+            # Buat parameter waypoints untuk Google Maps URL
+            waypoints_list = [f"{self.raw_data[node]['lat']},{self.raw_data[node]['lon']}" for node in intermediate_nodes]
+            waypoints_str = "|".join(waypoints_list)
+
+            # Susun URL Google Maps Directions
+            if waypoints_str:
+                gmaps_url = (
+                    f"https://www.google.com/maps/dir/?api=1"
+                    f"&origin={depot_lat},{depot_lon}"
+                    f"&destination={depot_lat},{depot_lon}"
+                    f"&waypoints={waypoints_str}"
+                    f"&travelmode=driving"
+                )
+            else:
+                gmaps_url = f"https://www.google.com/maps/search/?api=1&query={depot_lat},{depot_lon}"
+
             nama_rute = [self.raw_data[node]['name'] for node in rute_sa]
 
             hasil_akhir.append({
@@ -186,7 +207,8 @@ class VRPEngine:
                 "total_demand": muatan_sa,
                 "total_distance_km": round(jarak_sa, 2),
                 "total_time_minutes": round(waktu_sa, 2),
-                "is_feasible": is_feasible
+                "is_feasible": is_feasible,
+                "gmaps_url": gmaps_url  # URL Google Maps dikirim ke frontend
             })
 
         return {
