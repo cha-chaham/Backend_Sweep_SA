@@ -7,12 +7,20 @@ class Customer(BaseModel):
     lat: float
     lon: float
     demand: int = Field(..., ge=0, description="Permintaan botol harian")
+    image_url: Optional[str] = None
 
     class Config:
         from_attributes = True
 
 class CustomerUpdate(BaseModel):
     customers: List[Customer]
+
+class CustomerUpdateSingle(BaseModel):
+    name: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    demand: Optional[int] = None
+    image_url: Optional[str] = None
 
 class CustomerCreate(BaseModel):
     name: str

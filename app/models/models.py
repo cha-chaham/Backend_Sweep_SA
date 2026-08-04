@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text
 from datetime import datetime
 from app.database import Base
 
@@ -10,6 +10,7 @@ class CustomerModel(Base):
     lat = Column(Float, nullable=False)
     lon = Column(Float, nullable=False)
     demand = Column(Integer, default=0)
+    image_url = Column(String(500), nullable=True)
 
 class OptimizationHistoryModel(Base):
     __tablename__ = "optimization_history"
