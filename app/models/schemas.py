@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
+from datetime import date
 
 class Customer(BaseModel):
     id: int
@@ -42,3 +43,28 @@ class OptimizationResponse(BaseModel):
     depot: Dict[str, Any]  # Diubah dari Dict[str, float] ke Dict[str, Any]
     total_trips: int
     routes: List[RouteDetail]
+
+class ScheduledRouteCreate(BaseModel):
+    title: str
+    delivery_date: date
+    assigned_driver: Optional[str] = None
+    routes_data: Any  # Menerima seluruh objek hasil VRP (array trips, total jarak, dll)
+
+class ScheduledRouteResponse(ScheduledRouteCreate):
+    id: int
+    status: str
+    created_at: Any
+
+    class Config:
+        from_attributes = True
+
+class OptimizationRequest(BaseModel):
+    customers: List[CustomerCreate]
+
+class OptimizationItem(BaseModel):
+    id: Optional[int] = None
+    name: str
+    demand: int
+    lat: float
+    lon: float
+    gmaps_link: Optional[str] = None

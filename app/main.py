@@ -7,10 +7,12 @@ import uuid
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import date
+from typing import List
 
 from app.database import engine, get_db, Base
-from app.models.models import CustomerModel
-from app.models.schemas import CustomerUpdate, OptimizationResponse, Customer, CustomerCreate, CustomerUpdateSingle
+from app.models.models import CustomerModel, ScheduledRouteModel
+from app.models.schemas import CustomerUpdate, OptimizationResponse, Customer, CustomerCreate, CustomerUpdateSingle, ScheduledRouteCreate, ScheduledRouteResponse, OptimizationRequest, OptimizationItem
 from app.services.vrp_engine import VRPEngine
 from app.services.datastore import DEPOT, INITIAL_CUSTOMERS
 from app.services.gmaps_parser import parse_google_maps_url
@@ -192,20 +194,57 @@ async def create_customer(
     db.refresh(db_item)
     return db_item
 
-# 3. Endpoint POST: Menjalankan optimasi VRP
 @app.post("/api/optimize", tags=["Optimization"])
-def run_optimization(db: Session = Depends(get_db)):
+def run_optimization(payload: OptimizationRequest):
     """
-    Menjalankan optimasi Sweep dan Simulated Annealing.
+    Menjalankan optimasi Sweep dan Simulated Annealing berdasarkan data toko & demand dinamis.
     """
-    # Ambil seluruh data pelanggan langsung dari database (Get All Customers)
-    db_customers = db.query(CustomerModel).all()
+    if not payload.customers:
+        raise HTTPException(status_code=400, detail="Tidak ada toko yang dipilih untuk diantar.")
 
-    if not db_customers:
-        raise HTTPException(status_code=400, detail="Data pelanggan di database kosong.")
-
-    # Inisialisasi engine VRP dengan data dari database
-    vrp = VRPEngine(db_customers)
+    # VRPEngine langsung menerima list objek pelanggan dari payload frontend
+    vrp = VRPEngine(payload.customers)
     result = vrp.run_optimization()
 
     return result
+
+# 1. Simpan & Jadwalkan Rute Hasil Optimasi (Hanya Admin)
+@app.post("/api/scheduled-routes", response_model=ScheduledRouteResponse)
+def save_scheduled_route(
+    payload: ScheduledRouteCreate,
+    db: Session = Depends(get_db),
+    isAdmin: bool = Depends(verify_admin_role)  # Dilindungi passcode admin
+):
+    db_item = ScheduledRouteModel(
+        title=payload.title,
+        delivery_date=payload.delivery_date,
+        assigned_driver=payload.assigned_driver,
+        routes_data=payload.routes_data,
+        status="Scheduled"
+    )
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    return db_item
+
+# 2. Ambil Rute Pengiriman Hari Ini (Untuk Driver / User)
+@app.get("/api/scheduled-routes/today", response_model=List[ScheduledRouteResponse])
+def get_todays_routes(db: Session = Depends(get_db)):
+    today = date.today()
+    # Mengambil jadwal yang tanggal pengirimannya sama dengan hari ini
+    routes = db.query(ScheduledRouteModel).filter(ScheduledRouteModel.delivery_date == today).all()
+    return routes
+
+# 3. Ambil Riwayat / History Perjalanan (Untuk Driver / User & Admin)
+@app.get("/api/scheduled-routes/history", response_model=List[ScheduledRouteResponse])
+def get_route_history(db: Session = Depends(get_db)):
+    # Mengurutkan dari tanggal pengiriman terbaru
+    routes = db.query(ScheduledRouteModel).order_by(ScheduledRouteModel.delivery_date.desc()).all()
+    return routes
+
+@app.get("/api/scheduled-routes/{route_id}", response_model=ScheduledRouteResponse)
+def get_route_by_id(route_id: int, db: Session = Depends(get_db)):
+    route = db.query(ScheduledRouteModel).filter(ScheduledRouteModel.id == route_id).first()
+    if not route:
+        raise HTTPException(status_code=404, detail="Rute tidak ditemukan.")
+    return route
