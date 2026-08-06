@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Form
+from fastapi import FastAPI, Depends, HTTPException, File, UploadFile, Form, Header, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
@@ -6,6 +6,7 @@ import os
 import uuid
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from dotenv import load_dotenv
 
 from app.database import engine, get_db, Base
 from app.models.models import CustomerModel
@@ -16,12 +17,15 @@ from app.services.gmaps_parser import parse_google_maps_url
 
 # Inisialisasi tabel database
 Base.metadata.create_all(bind=engine)
+load_dotenv()  # Memuat variabel lingkungan dari file .env
 
 app = FastAPI(
     title="VRP API - Air Tahu Gurih Palu",
     description="REST API Vehicle Routing Problem dengan MySQL & SQLAlchemy",
     version="1.1.0"
 )
+
+ADMIN_PASSCODE = os.getenv("ADMIN_PASSCODE")
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static" / "images"
@@ -33,11 +37,25 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 # KONFIGURASI CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Izinkan origin frontend Vite
+    allow_origins=["*"],  # Izinkan origin frontend Vite
     allow_credentials=True,
     allow_methods=["*"],  # Izinkan semua metode (GET, POST, PUT, DELETE, dll)
     allow_headers=["*"],  # Izinkan semua headers
 )
+
+from fastapi import Header, HTTPException, status
+
+def verify_admin_role(x_admin_passcode: str = Header(None, alias="x-admin-passcode")):
+    # Debugging: Cek apa yang benar-benar diterima oleh backend
+    print(f"DEBUG - Header x-admin-passcode yang diterima: {x_admin_passcode}")
+    print(f"DEBUG - Passcode di ENV: {ADMIN_PASSCODE}")
+
+    if not x_admin_passcode or x_admin_passcode != ADMIN_PASSCODE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akses ditolak. Passcode Admin salah atau tidak valid."
+        )
+    return True
 
 @app.on_event("startup")
 def startup_event():
@@ -85,7 +103,7 @@ def get_customer_by_id(customer_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/api/customers/{customer_id}", response_model=Customer, tags=["Customer Management"])
-def update_single_customer(customer_id: int, payload: CustomerUpdateSingle, db: Session = Depends(get_db)):
+def update_single_customer(customer_id: int, payload: CustomerUpdateSingle, db: Session = Depends(get_db), isAdmin: str = Depends(verify_admin_role)):
     """
     Memperbarui data pelanggan tertentu berdasarkan ID.
     """
@@ -110,7 +128,11 @@ def update_single_customer(customer_id: int, payload: CustomerUpdateSingle, db: 
     return customer
 
 @app.delete("/api/customers/{customer_id}", tags=["Customer Management"])
-def delete_customer(customer_id: int, db: Session = Depends(get_db)):
+def delete_customer(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    isAdmin: str = Depends(verify_admin_role)):
+
     customer = db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Pelanggan tidak ditemukan.")
@@ -132,7 +154,8 @@ async def create_customer(
     gmaps_link: str = Form(...),
     demand: int = Form(...),
     image: UploadFile = File(None),  # Menerima file gambar opsional
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    isAdmin: str = Depends(verify_admin_role)  # Memeriksa hak akses Admin
 ):
     # Ekstrak koordinat dari link Google Maps
     lat, lon = parse_google_maps_url(gmaps_link)
