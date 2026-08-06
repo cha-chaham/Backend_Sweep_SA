@@ -20,7 +20,7 @@ Base.metadata.create_all(bind=engine)
 load_dotenv()  # Memuat variabel lingkungan dari file .env
 
 app = FastAPI(
-    title="VRP API - Air Tahu Gurih Palu",
+    title="VRP API - UMKM Air Tahu Gurih Palu",
     description="REST API Vehicle Routing Problem dengan MySQL & SQLAlchemy",
     version="1.1.0"
 )
