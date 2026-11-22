@@ -68,3 +68,13 @@ class OptimizationItem(BaseModel):
     lat: float
     lon: float
     gmaps_link: Optional[str] = None
+
+# Skema Pydantic untuk Validasi Input
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: str = "driver" # default driver
+
+class UserLogin(BaseModel):
+    username: str
+    password: str

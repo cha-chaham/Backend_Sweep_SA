@@ -199,16 +199,26 @@ class VRPEngine:
             else:
                 gmaps_url = f"https://www.google.com/maps/search/?api=1&query={depot_lat},{depot_lon}"
 
-            nama_rute = [self.raw_data[node]['name'] for node in rute_sa]
+            # KODE BARU YANG BENAR
+            stops_detail = []
+            for node in rute_sa:
+                node_data = self.raw_data[node]
+                stops_detail.append({
+                    "node": node,
+                    "name": node_data['name'],
+                    "demand": node_data['demand'],
+                    "lat": node_data['lat'],
+                    "lon": node_data['lon']
+                })
 
             hasil_akhir.append({
                 "trip_id": i + 1,
-                "route": nama_rute,
+                "route": stops_detail,  # <- Kirim array object, bukan sekadar list nama
                 "total_demand": muatan_sa,
                 "total_distance_km": round(jarak_sa, 2),
                 "total_time_minutes": round(waktu_sa, 2),
                 "is_feasible": is_feasible,
-                "gmaps_url": gmaps_url  # URL Google Maps dikirim ke frontend
+                "gmaps_url": gmaps_url
             })
 
         return {

@@ -9,10 +9,16 @@ from pathlib import Path
 from dotenv import load_dotenv
 from datetime import date
 from typing import List
+from pydantic import BaseModel
+
+from app.database import get_db
+from app.dependencies import require_admin, get_current_user
+from app.models.models import User
+from app.auth import hash_password, verify_password, create_access_token
 
 from app.database import engine, get_db, Base
 from app.models.models import CustomerModel, ScheduledRouteModel
-from app.models.schemas import CustomerUpdate, OptimizationResponse, Customer, CustomerCreate, CustomerUpdateSingle, ScheduledRouteCreate, ScheduledRouteResponse, OptimizationRequest, OptimizationItem
+from app.models.schemas import CustomerUpdate, OptimizationResponse, Customer, CustomerCreate, CustomerUpdateSingle, ScheduledRouteCreate, ScheduledRouteResponse, OptimizationRequest, OptimizationItem, UserCreate, UserLogin
 from app.services.vrp_engine import VRPEngine
 from app.services.datastore import DEPOT, INITIAL_CUSTOMERS
 from app.services.gmaps_parser import parse_google_maps_url
@@ -25,6 +31,14 @@ app = FastAPI(
     title="VRP API - UMKM Air Tahu Gurih Palu",
     description="REST API Vehicle Routing Problem dengan MySQL & SQLAlchemy",
     version="1.1.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
 )
 
 ADMIN_PASSCODE = os.getenv("ADMIN_PASSCODE")
@@ -46,18 +60,6 @@ app.add_middleware(
 )
 
 from fastapi import Header, HTTPException, status
-
-def verify_admin_role(x_admin_passcode: str = Header(None, alias="x-admin-passcode")):
-    # Debugging: Cek apa yang benar-benar diterima oleh backend
-    print(f"DEBUG - Header x-admin-passcode yang diterima: {x_admin_passcode}")
-    print(f"DEBUG - Passcode di ENV: {ADMIN_PASSCODE}")
-
-    if not x_admin_passcode or x_admin_passcode != ADMIN_PASSCODE:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Akses ditolak. Passcode Admin salah atau tidak valid."
-        )
-    return True
 
 @app.on_event("startup")
 def startup_event():
@@ -105,7 +107,7 @@ def get_customer_by_id(customer_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/api/customers/{customer_id}", response_model=Customer, tags=["Customer Management"])
-def update_single_customer(customer_id: int, payload: CustomerUpdateSingle, db: Session = Depends(get_db), isAdmin: str = Depends(verify_admin_role)):
+def update_single_customer(customer_id: int, payload: CustomerUpdateSingle, db: Session = Depends(get_db), current_user: dict = Depends(require_admin)):
     """
     Memperbarui data pelanggan tertentu berdasarkan ID.
     """
@@ -133,7 +135,7 @@ def update_single_customer(customer_id: int, payload: CustomerUpdateSingle, db: 
 def delete_customer(
     customer_id: int,
     db: Session = Depends(get_db),
-    isAdmin: str = Depends(verify_admin_role)):
+    current_user: dict = Depends(require_admin)):
 
     customer = db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
     if not customer:
@@ -157,7 +159,7 @@ async def create_customer(
     demand: int = Form(...),
     image: UploadFile = File(None),  # Menerima file gambar opsional
     db: Session = Depends(get_db),
-    isAdmin: str = Depends(verify_admin_role)  # Memeriksa hak akses Admin
+    current_user: dict = Depends(require_admin)
 ):
     # Ekstrak koordinat dari link Google Maps
     lat, lon = parse_google_maps_url(gmaps_link)
@@ -181,6 +183,9 @@ async def create_customer(
 
         # Path yang disimpan ke database (relatif untuk diakses browser)
         image_path = f"/static/images/{filename}"
+
+    print(lat)
+    print(lon)
 
     db_item = CustomerModel(
         name=name,
@@ -213,7 +218,7 @@ def run_optimization(payload: OptimizationRequest):
 def save_scheduled_route(
     payload: ScheduledRouteCreate,
     db: Session = Depends(get_db),
-    isAdmin: bool = Depends(verify_admin_role)  # Dilindungi passcode admin
+    current_user: dict = Depends(require_admin)
 ):
     db_item = ScheduledRouteModel(
         title=payload.title,
@@ -248,3 +253,53 @@ def get_route_by_id(route_id: int, db: Session = Depends(get_db)):
     if not route:
         raise HTTPException(status_code=404, detail="Rute tidak ditemukan.")
     return route
+
+# LOGIN
+@app.post("/api/login", tags=["Authentication"])
+def login(payload: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == payload.username).first()
+    if not user or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Username atau password salah!")
+
+    # Buat token sesi
+    token = create_access_token({"sub": user.username, "role": user.role})
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "role": user.role,
+        "username": user.username
+    }
+
+# 2. Endpoint Tambah User (HANYA ADMIN yang bisa menambah)
+@app.post("/api/admin/users", tags=["Authentication"])
+def create_user(payload: UserCreate, db: Session = Depends(get_db)):
+    # Cek apakah username sudah ada
+    existing_user = db.query(User).filter(User.username == payload.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username sudah digunakan!")
+
+    # Enkripsi password sebelum disimpan ke database
+    secure_password = hash_password(payload.password)
+
+
+    new_user = User(
+        username=payload.username,
+        hashed_password=secure_password,
+        role=payload.role
+    )
+    db.add(new_user)
+    db.commit()
+    return {"message": f"User {payload.username} berhasil ditambahkan dengan role {payload.role}"}
+
+@app.get("/api/admin/users", tags=["Authentication"])
+def get_all_users(admin: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    # Format data agar tidak membocorkan password (hashed_password tidak dikirim)
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "role": u.role
+        }
+        for u in users
+    ]

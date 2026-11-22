@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, JSON, func
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Date, JSON, func
 from datetime import datetime
 from app.database import Base
 
@@ -7,8 +7,8 @@ class CustomerModel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)  # Ditambahkan panjang (100)
-    lat = Column(Float, nullable=False)
-    lon = Column(Float, nullable=False)
+    lat = Column(Numeric(10, 8), nullable=False)
+    lon = Column(Numeric(10, 8), nullable=False)
     demand = Column(Integer, default=0)
     image_url = Column(String(500), nullable=True)
 
@@ -25,3 +25,11 @@ class ScheduledRouteModel(Base):
     routes_data = Column(JSON, nullable=False)
 
     created_at = Column(DateTime, server_default=func.now())
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(String(20), default="driver") # Pilihan: "admin" atau "driver"
